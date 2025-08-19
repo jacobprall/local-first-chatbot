@@ -1,13 +1,12 @@
-# Local-First Chatbot with SQLite
-## 🎯 Purpose
+# Local Chatbot with SQLite
 
-Demonstrate a complete local chatbot implementation using:
+A complete local chatbot implementation using:
 - **SQLite** as the core database
 - **sqlite-ai** for language model integration
 - **sqlite-vector** for semantic search and embeddings
 - **Streamlit** for an intuitive web interface
 
-Test local models, RAG strategies and more from your local machine.
+Test models, RAG strategies and more from your local machine.
 
 ## ✨ Features
 
@@ -149,7 +148,8 @@ SQLite extensions are automatically loaded:
 
 ## 🚧 Future Work
 
-- **sqlite-sync Integration**: Multi-device synchronization
+- **sqlite-sync Integration**: Multi-device synchronization for a truly local-first chatbot.
+- **Mutli-modal model support**: Support for image and audio models.
 
 ## 🛠️ Troubleshooting
 
