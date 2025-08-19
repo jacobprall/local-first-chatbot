@@ -6,7 +6,7 @@ A complete local chatbot implementation using:
 - **sqlite-vector** for semantic search and embeddings
 - **Streamlit** for an intuitive web interface
 
-Test models, RAG strategies and more from your local machine.
+Test models, model configurations, RAG strategies and more from a UI on your local machine.
 
 ## ✨ Features
 
