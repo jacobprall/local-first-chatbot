@@ -1,7 +1,4 @@
 # Local-First Chatbot with SQLite
-
-A complete local-first chatbot implementation demonstrating the power of SQLite with AI and vector extensions. This project showcases how to build a sophisticated RAG (Retrieval-Augmented Generation) chatbot entirely with SQLite, featuring document upload, semantic search, and a modern Streamlit interface.
-
 ## 🎯 Purpose
 
 Demonstrate a complete local chatbot implementation using:
@@ -10,15 +7,17 @@ Demonstrate a complete local chatbot implementation using:
 - **sqlite-vector** for semantic search and embeddings
 - **Streamlit** for an intuitive web interface
 
+Test local models, RAG strategies and more from your local machine.
+
 ## ✨ Features
 
+- **🔧 One-Line Setup**: Automated installation and configuration
 - **🤖 Local AI Chat**: Run language models entirely offline using GGUF format
 - **📚 Knowledge Base**: Upload and process documents (text, markdown) with automatic chunking
 - **🔍 Semantic Search**: Vector embeddings and hybrid search (semantic + full-text)
 - **💾 Persistent Storage**: All data stored locally in SQLite database
 - **🎛️ Model Management**: Easy switching between different language models
 - **📊 Performance Monitoring**: Real-time statistics and system information
-- **🔧 One-Line Setup**: Automated installation and configuration
 
 ## 🚀 Quick Start
 
