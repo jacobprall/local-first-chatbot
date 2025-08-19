@@ -146,11 +146,6 @@ SQLite extensions are automatically loaded:
 - **sqlite-ai**: Provides `llm_*` functions for AI operations
 - **sqlite-vector**: Provides `vector_*` functions for embeddings
 
-## 🚧 Future Work
-
-- **sqlite-sync Integration**: Multi-device synchronization for a truly local-first chatbot.
-- **Mutli-modal model support**: Support for image and audio models.
-
 ## 🛠️ Troubleshooting
 
 ### Common Issues
@@ -173,6 +168,11 @@ STREAMLIT_LOGGER_LEVEL=debug python -m streamlit run app/main.py
 - **SQLite 3.38+** (for extension support)
 - **4GB+ RAM** (recommended for larger models)
 - **macOS/Linux** (Windows support via WSL)
+
+## 🚧 Future Work
+
+- **sqlite-sync Integration**: Multi-device synchronization for a truly local-first chatbot.
+- **Mutli-modal model support**: Support for image and audio models.
 
 ## 🤝 Contributing
 
