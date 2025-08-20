@@ -140,10 +140,10 @@ class GracefulDegradationStrategy(RecoveryStrategy):
 
 class ErrorRecoveryHandler:
     """
-    Centralized error recovery handler that manages fallback strategies.
-    
-    This class provides a clean interface for handling errors with
-    multiple recovery strategies and consistent logging.
+    Manages error recovery through configurable fallback strategies.
+
+    Attempts multiple recovery approaches in sequence, providing resilient
+    operation and detailed error tracking for monitoring and debugging.
     """
     
     def __init__(self):

@@ -13,25 +13,27 @@ from .value_objects import SearchResult, SearchResults, ModelInfo, KnowledgeStat
 from .chatbot_interface import IChatbot
 
 
-# Model Configuration Constants
+# Configuration Constants
 class ModelConstants:
-    """Constants for model configuration and text generation."""
-    DEFAULT_PREDICTION_TOKENS = 16
-    RECOVERY_PREDICTION_TOKENS = 8
-    DEFAULT_CONTEXT_SIZE = 128
-    DEFAULT_GPU_LAYERS = 0
-    MAX_CONTEXT_SNIPPET_LENGTH = 100
-    MAX_LOG_MESSAGE_LENGTH = 50
-    MAX_CONTEXT_PREVIEW_LENGTH = 30
-    DEFAULT_SEARCH_LIMIT = 2
+    """Model configuration constants for consistent behavior across the application."""
+    # Text generation limits
+    DEFAULT_PREDICTION_TOKENS = 16    # Standard response length
+    RECOVERY_PREDICTION_TOKENS = 8    # Shorter responses for error recovery
+    DEFAULT_CONTEXT_SIZE = 128        # Model context window size
+    DEFAULT_GPU_LAYERS = 0            # CPU-only by default for compatibility
+
+    # Content processing limits
+    MAX_CONTEXT_SNIPPET_LENGTH = 100  # Max chars per context document
+    MAX_LOG_MESSAGE_LENGTH = 50       # Truncation for log messages
+    MAX_CONTEXT_PREVIEW_LENGTH = 30   # Preview length in logs
+    DEFAULT_SEARCH_LIMIT = 2          # Default number of context documents
 
 
-# Prompt Templates
 class PromptTemplates:
-    """Standard prompt templates for different message types."""
+    """Standardized prompt formats for consistent model interaction."""
     SIMPLE_CHAT = "Human: {message}\nAssistant:"
     RAG_CHAT = "Context: {context}\nHuman: {message}\nAssistant:"
-    RECOVERY_CHAT = "Q: {message}\nA:"
+    RECOVERY_CHAT = "Q: {message}\nA:"  # Simplified format for error recovery
 
 
 class Chatbot(IChatbot):
@@ -211,7 +213,8 @@ class Chatbot(IChatbot):
         try:
             query_embedding = None
 
-            # Generate embedding if required by strategy and model is loaded
+            # Generate embedding for semantic search if needed
+            # Some strategies (semantic, hybrid) require embeddings for vector similarity
             if self.search_context.requires_embedding() and model_manager.is_model_loaded():
                 print(f"   🧠 Generating embedding for query...")
                 try:

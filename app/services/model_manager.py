@@ -1,8 +1,8 @@
 """
-Model Manager for handling model state and lifecycle.
+Centralized model state management using the Singleton pattern.
 
-This module provides centralized model state management following the Singleton pattern
-to ensure consistent model state across the application.
+Manages model loading, configuration, and lifecycle to ensure consistent
+state across the application and prevent duplicate model loading.
 """
 
 import os
@@ -13,10 +13,10 @@ from .model_configuration import ModelConfiguration, ModelConfigurations
 
 class ModelManager:
     """
-    Singleton class for managing model state and lifecycle.
-    
-    This class centralizes model loading, state tracking, and configuration
-    to follow the Single Responsibility Principle and avoid scattered state management.
+    Singleton for centralized model state management.
+
+    Ensures only one model is loaded at a time and provides consistent
+    access to model state across the application.
     """
     
     _instance: Optional['ModelManager'] = None
@@ -32,8 +32,7 @@ class ModelManager:
         return cls._instance
     
     def __init__(self):
-        """Initialize the model manager."""
-        # Only initialize once
+        """Initialize the model manager (singleton pattern)."""
         if not hasattr(self, '_initialized'):
             self._initialized = True
     
@@ -62,16 +61,18 @@ class ModelManager:
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found: {model_path}")
 
-        # Use provided config or create default
+        # Configuration resolution: prefer config object over legacy options string
         if config is None:
             if options:
-                # Legacy support: use options string
+                # Legacy support: use provided options string with default config
                 config = ModelConfigurations.balanced()
                 final_options = options
             else:
+                # No config provided: use balanced defaults
                 config = ModelConfigurations.balanced()
                 final_options = config.to_options_string()
         else:
+            # Use provided config after validation
             config.validate()
             final_options = config.to_options_string()
 

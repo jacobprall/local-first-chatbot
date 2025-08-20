@@ -1,8 +1,8 @@
 """
-Value Objects for replacing primitive obsession.
+Type-safe value objects for structured data representation.
 
-This module provides strongly-typed value objects to replace primitive
-dictionaries and lists, improving type safety and code clarity.
+Replaces primitive dictionaries and lists with strongly-typed objects
+that provide validation, methods, and clear interfaces.
 """
 
 from dataclasses import dataclass, field
@@ -22,10 +22,10 @@ class SearchType(Enum):
 @dataclass(frozen=True)
 class SearchResult:
     """
-    Value object representing a search result.
-    
-    This replaces primitive dictionaries for search results,
-    providing type safety and clear structure.
+    Structured representation of a knowledge base search result.
+
+    Provides type safety and utility methods for search result data
+    that was previously represented as primitive dictionaries.
     """
     id: int
     content: str
