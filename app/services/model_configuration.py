@@ -1,8 +1,8 @@
 """
-Model Configuration classes for encapsulating model parameters.
+Model Configuration classes for structured parameter management.
 
-This module provides parameter objects to reduce primitive obsession and
-improve the maintainability of model configuration.
+Provides type-safe configuration objects for model loading and sampling
+parameters, replacing primitive parameter lists with structured objects.
 """
 
 from dataclasses import dataclass
@@ -12,10 +12,10 @@ from typing import Optional, Dict, Any
 @dataclass
 class ModelConfiguration:
     """
-    Parameter object for model configuration settings.
-    
-    This class encapsulates all model loading and inference parameters
-    to reduce parameter lists and improve maintainability.
+    Structured configuration for model loading and inference parameters.
+
+    Encapsulates all model settings in a type-safe, validated object
+    with convenient methods for serialization and validation.
     """
     
     # Core model settings

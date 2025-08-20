@@ -1,8 +1,8 @@
 """
-Error Recovery Handler for managing fallback logic and error handling strategies.
+Centralized error recovery with multiple fallback strategies.
 
-This module centralizes error handling and recovery strategies to improve
-maintainability and provide consistent error handling across the application.
+Provides robust error handling through configurable recovery strategies,
+improving application resilience and user experience.
 """
 
 from abc import ABC, abstractmethod

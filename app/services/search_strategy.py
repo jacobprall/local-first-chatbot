@@ -1,8 +1,8 @@
 """
-Search Strategy Pattern implementation for knowledge base search.
+Pluggable search strategies for knowledge base queries.
 
-This module implements the Strategy pattern to encapsulate different search
-algorithms and make them interchangeable at runtime.
+Implements the Strategy pattern to provide different search approaches
+(hybrid, semantic, text-based) that can be switched at runtime.
 """
 
 from abc import ABC, abstractmethod
@@ -11,12 +11,7 @@ from .vector import VectorService
 
 
 class SearchStrategy(ABC):
-    """
-    Abstract base class for search strategies.
-    
-    This interface defines the contract for different search implementations,
-    allowing them to be used interchangeably.
-    """
+    """Interface for pluggable search strategies."""
     
     @abstractmethod
     def search(self, query: str, vector_service: VectorService, 
@@ -48,10 +43,10 @@ class SearchStrategy(ABC):
 
 class HybridSearchStrategy(SearchStrategy):
     """
-    Hybrid search strategy combining semantic and full-text search.
-    
-    This strategy provides the best of both worlds by combining
-    vector similarity search with traditional keyword matching.
+    Combines semantic similarity and keyword matching for comprehensive search.
+
+    Provides the most robust search by leveraging both vector embeddings
+    and traditional full-text search capabilities.
     """
     
     def search(self, query: str, vector_service: VectorService, 

@@ -185,3 +185,5 @@ This project demonstrates local-first AI principles. Contributions welcome for:
 ---
 
 **Built with ❤️ using SQLite, sqlite-ai, sqlite-vector, and Streamlit**
+
+When I input a chat, while loading the next chat, there are visual glitches and duplicate components on the screen
