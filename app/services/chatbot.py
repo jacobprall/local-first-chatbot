@@ -5,6 +5,9 @@ from .ai import AIService
 from .vector import VectorService
 from .chat_history import ChatHistoryManager
 from .model_manager import model_manager
+from .model_configuration import ModelConfiguration, ModelConfigurations, SamplingConfiguration, SamplingConfigurations
+from .search_strategy import SearchContext, SearchStrategies
+from .error_recovery import ErrorRecoveryHandler, ErrorRecoveryConfigurations
 
 
 # Model Configuration Constants
@@ -46,6 +49,12 @@ class Chatbot:
         self.message_count = 0  # Track messages to know when to reset
         self.rag_enabled = True  # RAG mode enabled by default
 
+        # Initialize search strategy
+        self.search_context = SearchContext(SearchStrategies.robust_fallback())
+
+        # Initialize error recovery handler
+        self.error_recovery = ErrorRecoveryConfigurations.robust()
+
         # Initialize model manager with AI service
         model_manager.initialize_ai_service(self.ai)
 
@@ -71,17 +80,45 @@ class Chatbot:
         except Exception as e:
             print(f"Failed to reset inference state: {e}")
     
-    def load_model(self, model_path: str, options: str = "") -> bool:
-        """Load a GGUF model for inference using ModelManager."""
-        # Use default options if none provided
-        if not options:
-            options = (
-                f"n_predict={ModelConstants.DEFAULT_PREDICTION_TOKENS},"
-                f"n_ctx={ModelConstants.DEFAULT_CONTEXT_SIZE},"
-                f"n_gpu_layers={ModelConstants.DEFAULT_GPU_LAYERS}"
-            )
+    def load_model(self, model_path: str, config: Optional[ModelConfiguration] = None, options: str = "") -> bool:
+        """
+        Load a GGUF model for inference using ModelManager.
 
-        return model_manager.load_model(model_path, options)
+        Args:
+            model_path: Path to the GGUF model file
+            config: Model configuration object (preferred)
+            options: Legacy options string (deprecated)
+
+        Returns:
+            bool: True if model loaded successfully
+        """
+        # Use default configuration if none provided
+        if config is None and not options:
+            config = ModelConfigurations.balanced()
+
+        return model_manager.load_model(model_path, config, options)
+
+    def load_model_with_preset(self, model_path: str, preset: str = "balanced") -> bool:
+        """
+        Load a model with a predefined configuration preset.
+
+        Args:
+            model_path: Path to the GGUF model file
+            preset: Configuration preset name ('fast', 'balanced', 'high_quality', 'creative', 'gpu')
+
+        Returns:
+            bool: True if model loaded successfully
+        """
+        preset_configs = {
+            "fast": ModelConfigurations.fast_inference(),
+            "balanced": ModelConfigurations.balanced(),
+            "high_quality": ModelConfigurations.high_quality(),
+            "creative": ModelConfigurations.creative(),
+            "gpu": ModelConfigurations.gpu_accelerated()
+        }
+
+        config = preset_configs.get(preset, ModelConfigurations.balanced())
+        return self.load_model(model_path, config)
     
     def send_message(self, message: str) -> str:
         """Send a message and get a complete response."""
@@ -125,17 +162,20 @@ class Chatbot:
         return response.strip()
 
     def _handle_generation_error(self, message: str, error: Exception) -> str:
-        """Handle text generation errors with fallback strategies."""
+        """Handle text generation errors using the error recovery handler."""
         print(f"Text generation failed on message #{self.message_count}: {error}")
 
+        context = {
+            "operation_type": "text_generation",
+            "message": message,
+            "ai_service": self.ai,
+            "reset_function": self._reset_inference_state
+        }
+
         try:
-            print("Attempting recovery with simpler prompt...")
-            self._reset_inference_state()
-            recovery_prompt = PromptTemplates.RECOVERY_CHAT.format(message=message)
-            response = self._generate_text_response(recovery_prompt, f"n_predict={ModelConstants.RECOVERY_PREDICTION_TOKENS}")
-            return self._clean_response(response)
-        except Exception as recovery_error:
-            print(f"Recovery attempt failed: {recovery_error}")
+            return self.error_recovery.handle_error(error, context)
+        except Exception as final_error:
+            print(f"All recovery attempts failed: {final_error}")
             return f"I received your message: {message}"
     
     def send_message_with_rag(self, message: str) -> str:
@@ -233,15 +273,16 @@ class Chatbot:
             return []
     
     def search_knowledge(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
-        """Search the knowledge base using hybrid semantic + full-text search"""
+        """Search the knowledge base using the configured search strategy."""
         print(f"\n🔎 KNOWLEDGE SEARCH: '{query}' (limit={limit})")
         print(f"   Model loaded: {model_manager.is_model_loaded()}")
+        print(f"   Search strategy: {self.search_context.get_current_strategy_name()}")
 
         try:
             query_embedding = None
 
-            # Generate embedding if model is loaded
-            if model_manager.is_model_loaded():
+            # Generate embedding if required by strategy and model is loaded
+            if self.search_context.requires_embedding() and model_manager.is_model_loaded():
                 print(f"   🧠 Generating embedding for query...")
                 try:
                     query_embedding = self.ai.generate_embedding(query)
@@ -249,26 +290,65 @@ class Chatbot:
                     print(f"   ✅ Generated {embedding_size} byte embedding")
                 except Exception as e:
                     print(f"   ❌ Failed to generate embedding: {e}")
+            elif self.search_context.requires_embedding():
+                print(f"   ⚠️  Strategy requires embedding but no model loaded")
             else:
-                print(f"   ⚠️  No model loaded, skipping embedding generation")
-            
-            # Use hybrid search for best results
-            print(f"   🔄 Calling hybrid search...")
-            results = self.vector.hybrid_search(query, query_embedding, limit)
-            
+                print(f"   ℹ️  Strategy doesn't require embedding")
+
+            # Execute search using current strategy
+            results = self.search_context.search(query, self.vector, query_embedding, limit)
+
             if results:
-                print(f"   ✅ Hybrid search returned {len(results)} results")
+                print(f"   ✅ Search returned {len(results)} results")
                 return results
-            
-            # Fallback to simple text search if hybrid fails
-            print(f"   🔄 Hybrid search failed, falling back to simple text search...")
-            fallback_results = self.vector.search_documents(query, limit)
-            print(f"   📝 Text fallback returned {len(fallback_results)} results")
-            return fallback_results
-            
+            else:
+                print(f"   ⚠️  Search returned no results")
+                return []
+
         except Exception as e:
             print(f"   ❌ Knowledge search completely failed: {e}")
             return []
+
+    def set_search_strategy(self, strategy_name: str) -> bool:
+        """
+        Change the search strategy at runtime.
+
+        Args:
+            strategy_name: Name of the strategy ('hybrid', 'semantic', 'text', 'robust_fallback')
+
+        Returns:
+            bool: True if strategy was set successfully
+        """
+        try:
+            strategy_map = {
+                "hybrid": SearchStrategies.hybrid(),
+                "semantic": SearchStrategies.semantic(),
+                "text": SearchStrategies.text(),
+                "robust_fallback": SearchStrategies.robust_fallback(),
+                "embedding_fallback": SearchStrategies.embedding_fallback(),
+                "text_only_fallback": SearchStrategies.text_only_fallback()
+            }
+
+            if strategy_name not in strategy_map:
+                print(f"Unknown search strategy: {strategy_name}")
+                return False
+
+            self.search_context.set_strategy(strategy_map[strategy_name])
+            print(f"Search strategy changed to: {strategy_name}")
+            return True
+
+        except Exception as e:
+            print(f"Failed to set search strategy: {e}")
+            return False
+
+    def get_search_strategy_info(self) -> Dict[str, Any]:
+        """Get information about the current search strategy."""
+        return {
+            "current_strategy": self.search_context.get_current_strategy_name(),
+            "requires_embedding": self.search_context.requires_embedding(),
+            "model_loaded": model_manager.is_model_loaded(),
+            "available_strategies": ["hybrid", "semantic", "text", "robust_fallback", "embedding_fallback", "text_only_fallback"]
+        }
     
     def toggle_rag(self, enabled: bool) -> None:
         """Enable or disable RAG mode"""
@@ -380,20 +460,98 @@ class Chatbot:
         info["chat_active"] = self.current_chat_id is not None
         return info
     
-    def configure_sampling(self, temperature: float = 0.7, top_p: float = 0.9, top_k: Optional[int] = None) -> None:
-        """Configure sampling parameters for text generation."""
+    def configure_sampling(self, config: Optional[SamplingConfiguration] = None,
+                          temperature: float = None, top_p: float = None, top_k: Optional[int] = None) -> None:
+        """
+        Configure sampling parameters for text generation.
+
+        Args:
+            config: SamplingConfiguration object (preferred)
+            temperature: Legacy parameter (deprecated, use config)
+            top_p: Legacy parameter (deprecated, use config)
+            top_k: Legacy parameter (deprecated, use config)
+        """
         try:
-            if temperature <= 0.1:
+            # Use config object if provided, otherwise create from legacy parameters
+            if config is None:
+                if temperature is not None or top_p is not None or top_k is not None:
+                    # Legacy support
+                    config = SamplingConfiguration(
+                        temperature=temperature if temperature is not None else 0.7,
+                        top_p=top_p if top_p is not None else 0.9,
+                        top_k=top_k
+                    )
+                else:
+                    config = SamplingConfigurations.balanced()
+
+            config.validate()
+
+            if config.is_greedy():
                 self.ai.configure_sampler_greedy()
             else:
-                self.ai.configure_sampler_temperature(max(0.1, temperature))
-                if top_p > 0:
-                    self.ai.configure_sampler_top_p(min(0.95, max(0.1, top_p)), 1)
-                if top_k and top_k > 0:
-                    self.ai.configure_sampler_top_k(max(1, min(100, top_k)))
+                self.ai.configure_sampler_temperature(config.temperature)
+                if config.top_p > 0:
+                    self.ai.configure_sampler_top_p(config.top_p, config.min_keep)
+                if config.top_k and config.top_k > 0:
+                    self.ai.configure_sampler_top_k(config.top_k)
+
         except Exception as e:
             print(f"Failed to configure sampling: {e}")
             self.ai.configure_sampler_greedy()
+
+    def configure_sampling_preset(self, preset: str = "balanced") -> None:
+        """
+        Configure sampling with a predefined preset.
+
+        Args:
+            preset: Preset name ('greedy', 'balanced', 'creative', 'focused')
+        """
+        preset_configs = {
+            "greedy": SamplingConfigurations.greedy(),
+            "balanced": SamplingConfigurations.balanced(),
+            "creative": SamplingConfigurations.creative(),
+            "focused": SamplingConfigurations.focused()
+        }
+
+        config = preset_configs.get(preset, SamplingConfigurations.balanced())
+        self.configure_sampling(config)
+
+    def get_error_recovery_stats(self) -> Dict[str, Any]:
+        """Get error recovery statistics."""
+        return self.error_recovery.get_error_stats()
+
+    def clear_error_log(self) -> None:
+        """Clear the error recovery log."""
+        self.error_recovery.clear_error_log()
+
+    def set_error_recovery_mode(self, mode: str = "robust") -> bool:
+        """
+        Change the error recovery mode.
+
+        Args:
+            mode: Recovery mode ('basic', 'robust', 'text_generation_focused')
+
+        Returns:
+            bool: True if mode was set successfully
+        """
+        try:
+            mode_configs = {
+                "basic": ErrorRecoveryConfigurations.basic(),
+                "robust": ErrorRecoveryConfigurations.robust(),
+                "text_generation_focused": ErrorRecoveryConfigurations.text_generation_focused()
+            }
+
+            if mode not in mode_configs:
+                print(f"Unknown error recovery mode: {mode}")
+                return False
+
+            self.error_recovery = mode_configs[mode]
+            print(f"Error recovery mode changed to: {mode}")
+            return True
+
+        except Exception as e:
+            print(f"Failed to set error recovery mode: {e}")
+            return False
     
     def generate_embedding(self, text: str) -> bytes:
         """Generate embedding for the given text."""
