@@ -70,8 +70,12 @@ class Chatbot(IChatbot):
 
         # Initialize message handler for RAG processing
         self.message_handler = MessageHandlerFactory.create_handler(
-            "rag", self.ai, self.vector, self.search_context, self.error_recovery
+            "rag", self.ai, self.vector, self.search_context, self.error_recovery,
+            chatbot_instance=self
         )
+
+        # Initialize prediction tokens setting
+        self._prediction_tokens = ModelConstants.DEFAULT_PREDICTION_TOKENS
 
         # Set up model manager and load model if provided
         model_manager.initialize_ai_service(self.ai)
@@ -349,6 +353,14 @@ class Chatbot(IChatbot):
     def delete_uploaded_file(self, file_id: int) -> bool:
         """Delete an uploaded file"""
         return self.vector.delete_uploaded_file(file_id)
+
+    def cleanup_orphaned_chunks(self) -> int:
+        """Remove document chunks that reference non-existent files"""
+        return self.vector.cleanup_orphaned_chunks()
+
+    def cleanup_mismatched_embeddings(self) -> int:
+        """Remove embeddings with incorrect dimensions"""
+        return self.vector.cleanup_mismatched_embeddings()
     
     def get_file_stats(self) -> Dict[str, Any]:
         """Get file upload statistics"""
@@ -479,6 +491,61 @@ class Chatbot(IChatbot):
 
         config = preset_configs.get(preset, SamplingConfigurations.balanced())
         self.configure_sampling(config)
+
+    def set_output_length(self, tokens: int) -> bool:
+        """
+        Set the maximum output length in tokens.
+
+        Args:
+            tokens: Number of tokens to generate (1-512)
+
+        Returns:
+            bool: True if successfully updated
+        """
+        try:
+            # Validate token count
+            if tokens < 1 or tokens > 512:
+                print(f"Invalid token count: {tokens}. Must be between 1 and 512.")
+                return False
+
+            # Store the prediction tokens setting for use in text generation
+            if not hasattr(self, '_prediction_tokens'):
+                self._prediction_tokens = ModelConstants.DEFAULT_PREDICTION_TOKENS
+
+            self._prediction_tokens = tokens
+            print(f"Output length updated to {tokens} tokens")
+            return True
+
+        except Exception as e:
+            print(f"Error setting output length: {e}")
+            return False
+
+    def get_output_length(self) -> int:
+        """
+        Get the current output length setting.
+
+        Returns:
+            int: Current prediction tokens setting
+        """
+        try:
+            # Return stored prediction tokens or default
+            if hasattr(self, '_prediction_tokens'):
+                return self._prediction_tokens
+            else:
+                return ModelConstants.DEFAULT_PREDICTION_TOKENS
+        except Exception as e:
+            print(f"Error getting output length: {e}")
+            return ModelConstants.DEFAULT_PREDICTION_TOKENS
+
+    def _get_generation_options(self) -> str:
+        """
+        Get the current generation options string including prediction tokens.
+
+        Returns:
+            str: Options string for text generation
+        """
+        prediction_tokens = self.get_output_length()
+        return f"n_predict={prediction_tokens}"
 
     def get_error_recovery_stats(self) -> ErrorStats:
         """Get error recovery statistics as a value object."""

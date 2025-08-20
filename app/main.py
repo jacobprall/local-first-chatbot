@@ -164,9 +164,11 @@ with tab1:
     # Settings popover content
     if st.session_state.get("show_settings", False):
         with st.expander("⚙️ Settings", expanded=True):
-            settings_col1, settings_col2 = st.columns(2)
-            
-            with settings_col1:
+            # Create tabs within the settings
+            settings_tab1, settings_tab2, settings_tab3 = st.tabs(["🤖 Model", "🎛️ Generation", "🔧 Advanced"])
+
+            # Model Selection Tab
+            with settings_tab1:
                 st.subheader("Model Selection")
                 available_models = get_available_models()
                 if available_models:
@@ -177,7 +179,7 @@ with tab1:
                         help="Choose from available GGUF models",
                         key="model_selector_settings"
                     )
-                    
+
                     if selected_model != st.session_state.selected_model:
                         st.session_state.selected_model = selected_model
                         # Load new model
@@ -192,35 +194,185 @@ with tab1:
                                     st.error(f"Failed to load model: {selected_model}")
                 else:
                     st.warning("No GGUF models found in models/ directory")
-            
-            with settings_col2:
-                st.subheader("Generation Settings")
-                # Sampling mode
+
+                # Model Information (if model is loaded)
                 if chatbot.is_ready():
+                    st.divider()
+                    st.subheader("Current Model Info")
+                    try:
+                        model_info = chatbot.get_model_info().to_dict()
+                        info_col1, info_col2 = st.columns(2)
+
+                        with info_col1:
+                            st.metric("Parameters", f"{model_info.get('n_params', 'Unknown'):,}" if isinstance(model_info.get('n_params'), (int, float)) else model_info.get('n_params', 'Unknown'))
+                            st.metric("Context Length", f"{model_info.get('n_ctx_train', 'Unknown'):,}" if isinstance(model_info.get('n_ctx_train'), (int, float)) else model_info.get('n_ctx_train', 'Unknown'))
+
+                        with info_col2:
+                            st.metric("Layers", model_info.get('n_layer', 'Unknown'))
+                            st.metric("Embedding Dim", model_info.get('n_embd', 'Unknown'))
+                    except Exception as e:
+                        st.error(f"Error getting model info: {e}")
+            
+            # Generation Settings Tab
+            with settings_tab2:
+                if chatbot.is_ready():
+                    # Output Length Section
+                    st.subheader("📏 Output Length")
+                    current_length = chatbot.get_output_length()
+
+                    # Preset buttons for common lengths
+                    st.write("**Quick Presets:**")
+                    preset_col1, preset_col2, preset_col3, preset_col4 = st.columns(4)
+
+                    with preset_col1:
+                        if st.button("Short (16)", help="16 tokens - Quick answers", key="preset_short"):
+                            chatbot.set_output_length(16)
+                            st.rerun()
+
+                    with preset_col2:
+                        if st.button("Medium (64)", help="64 tokens - Detailed responses", key="preset_medium"):
+                            chatbot.set_output_length(64)
+                            st.rerun()
+
+                    with preset_col3:
+                        if st.button("Long (128)", help="128 tokens - Comprehensive answers", key="preset_long"):
+                            chatbot.set_output_length(128)
+                            st.rerun()
+
+                    with preset_col4:
+                        if st.button("Max (256)", help="256 tokens - Extended responses", key="preset_max"):
+                            chatbot.set_output_length(256)
+                            st.rerun()
+
+                    # Fine-grained slider control
+                    output_length = st.slider(
+                        "Custom Length (tokens)",
+                        min_value=1,
+                        max_value=512,
+                        value=current_length,
+                        step=1,
+                        help="Maximum number of tokens to generate",
+                        key="output_length_settings"
+                    )
+
+                    # Update output length if changed
+                    if output_length != current_length:
+                        if chatbot.set_output_length(output_length):
+                            st.success(f"Output length updated to {output_length} tokens")
+                        else:
+                            st.error("Failed to update output length")
+
+                    st.divider()
+
+                    # Sampling Section
+                    st.subheader("🎲 Sampling Strategy")
                     sampling_mode = st.selectbox(
                         "Sampling Mode",
                         ["Greedy", "Temperature", "Top-P"],
                         help="Text generation strategy",
                         key="sampling_mode_settings"
                     )
-                    
+
                     # Advanced sampling parameters
                     if sampling_mode != "Greedy":
-                        temperature = st.slider(
-                            "Temperature", 
-                            0.1, 2.0, 0.8, 0.1,
-                            help="Controls randomness",
-                            key="temp_settings"
-                        )
-                        
-                        if sampling_mode == "Top-P":
-                            top_p = st.slider(
-                                "Top P", 
-                                0.1, 0.95, 0.9, 0.05,
-                                help="Nucleus sampling",
-                                key="top_p_settings"
+                        temp_col1, temp_col2 = st.columns(2)
+
+                        with temp_col1:
+                            temperature = st.slider(
+                                "Temperature",
+                                0.1, 2.0, 0.8, 0.1,
+                                help="Controls randomness (higher = more creative)",
+                                key="temp_settings"
                             )
-            
+
+                        with temp_col2:
+                            if sampling_mode == "Top-P":
+                                top_p = st.slider(
+                                    "Top P",
+                                    0.1, 0.95, 0.9, 0.05,
+                                    help="Nucleus sampling (lower = more focused)",
+                                    key="top_p_settings"
+                                )
+                else:
+                    st.warning("⚠️ Load a model to access generation settings")
+
+            # Advanced Settings Tab
+            with settings_tab3:
+                if chatbot.is_ready():
+                    st.subheader("🔧 Advanced Sampling")
+                    st.write("Fine-tune all sampling parameters for expert control.")
+
+                    adv_col1, adv_col2, adv_col3 = st.columns(3)
+
+                    with adv_col1:
+                        adv_temperature = st.slider(
+                            "Temperature",
+                            0.0, 2.0, 0.8, 0.1,
+                            help="Controls randomness in text generation",
+                            key="adv_temp"
+                        )
+
+                    with adv_col2:
+                        adv_top_p = st.slider(
+                            "Top P",
+                            0.1, 0.95, 0.9, 0.05,
+                            help="Nucleus sampling parameter",
+                            key="adv_top_p"
+                        )
+
+                    with adv_col3:
+                        adv_top_k = st.slider(
+                            "Top K",
+                            1, 100, 40, 1,
+                            help="Top-K sampling parameter",
+                            key="adv_top_k"
+                        )
+
+                    if st.button("Apply Advanced Settings", type="primary"):
+                        try:
+                            chatbot.configure_sampling(temperature=adv_temperature, top_p=adv_top_p, top_k=adv_top_k)
+                            st.success("Advanced sampling settings applied!")
+                        except Exception as e:
+                            st.error(f"Failed to update settings: {e}")
+
+                    st.divider()
+
+                    # Preset configurations
+                    st.subheader("🎯 Sampling Presets")
+                    preset_desc_col1, preset_desc_col2 = st.columns(2)
+
+                    with preset_desc_col1:
+                        if st.button("🎯 Greedy (Deterministic)", help="Most predictable responses"):
+                            try:
+                                chatbot.configure_sampling_preset("greedy")
+                                st.success("Applied Greedy preset!")
+                            except Exception as e:
+                                st.error(f"Failed to apply preset: {e}")
+
+                        if st.button("🎨 Creative (High Variance)", help="More creative and varied responses"):
+                            try:
+                                chatbot.configure_sampling_preset("creative")
+                                st.success("Applied Creative preset!")
+                            except Exception as e:
+                                st.error(f"Failed to apply preset: {e}")
+
+                    with preset_desc_col2:
+                        if st.button("⚖️ Balanced (Default)", help="Good balance of creativity and coherence"):
+                            try:
+                                chatbot.configure_sampling_preset("balanced")
+                                st.success("Applied Balanced preset!")
+                            except Exception as e:
+                                st.error(f"Failed to apply preset: {e}")
+
+                        if st.button("🔍 Focused (Low Variance)", help="More focused and consistent responses"):
+                            try:
+                                chatbot.configure_sampling_preset("focused")
+                                st.success("Applied Focused preset!")
+                            except Exception as e:
+                                st.error(f"Failed to apply preset: {e}")
+                else:
+                    st.warning("⚠️ Load a model to access advanced settings")
+
             # Close settings button
             if st.button("Close Settings", type="secondary"):
                 st.session_state.show_settings = False
@@ -558,9 +710,9 @@ with tab2:
     # Knowledge base management
     st.divider()
     st.subheader("🔧 Knowledge Base Management")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         if st.button("🧹 Clear All Knowledge", type="secondary"):
             if chatbot.clear_knowledge():
@@ -568,8 +720,29 @@ with tab2:
                 st.rerun()
             else:
                 st.error("Failed to clear knowledge base")
-    
+
     with col2:
+        if st.button("🗑️ Cleanup Orphaned Chunks", type="secondary", help="Remove document chunks from deleted files"):
+            cleaned_count = chatbot.cleanup_orphaned_chunks()
+            if cleaned_count > 0:
+                st.success(f"Cleaned up {cleaned_count} orphaned chunks!")
+                st.rerun()
+            else:
+                st.info("No orphaned chunks found.")
+
+    # Second row for additional cleanup options
+    col3, col4 = st.columns(2)
+
+    with col3:
+        if st.button("🔧 Fix Embedding Dimensions", type="secondary", help="Remove embeddings with incorrect dimensions"):
+            cleaned_count = chatbot.cleanup_mismatched_embeddings()
+            if cleaned_count > 0:
+                st.success(f"Cleaned up {cleaned_count} mismatched embeddings!")
+                st.rerun()
+            else:
+                st.info("All embeddings have correct dimensions.")
+
+    with col4:
         if knowledge_stats['vector_extension'] and knowledge_stats['documents_with_embeddings'] > 0:
             if st.button("⚡ Optimize Vectors", type="secondary"):
                 try:
@@ -682,36 +855,7 @@ with tab3:
         # Advanced settings
         st.subheader("⚙️ Advanced Settings")
         
-        with st.expander("🎛️ Sampling Configuration"):
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                temperature = st.slider(
-                    "Temperature", 
-                    0.0, 2.0, 0.8, 0.1,
-                    help="Controls randomness in text generation"
-                )
-            
-            with col2:
-                top_p = st.slider(
-                    "Top P", 
-                    0.1, 0.95, 0.9, 0.05,
-                    help="Nucleus sampling parameter"
-                )
-            
-            with col3:
-                top_k = st.slider(
-                    "Top K", 
-                    1, 100, 40, 1,
-                    help="Top-K sampling parameter"
-                )
-            
-            if st.button("Apply Sampling Settings"):
-                try:
-                    chatbot.configure_sampling(temperature=temperature, top_p=top_p, top_k=top_k)
-                    st.success("Sampling settings updated!")
-                except Exception as e:
-                    st.error(f"Failed to update settings: {e}")
+
         
         with st.expander("🗄️ Database Information"):
             import os

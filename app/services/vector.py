@@ -28,6 +28,44 @@ class VectorService:
             print(f"Vector extension not available: {e}")
         return False
     
+    def _get_embedding_dimension(self) -> int:
+        """Detect the embedding dimension from existing embeddings or test generation"""
+        try:
+            # First, check if we have existing embeddings
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT embedding FROM documents
+                    WHERE embedding IS NOT NULL
+                    LIMIT 1
+                """)
+                result = cursor.fetchone()
+
+                if result and result[0]:
+                    embedding_bytes = result[0]
+                    dimension = len(embedding_bytes) // 4
+                    print(f"Detected embedding dimension from existing data: {dimension}")
+                    return dimension
+
+            # If no existing embeddings, try to generate a test embedding
+            try:
+                from .ai import AIService
+                ai_service = AIService(self.db_manager)
+                test_embedding = ai_service.generate_embedding("test")
+                if test_embedding:
+                    dimension = len(test_embedding) // 4
+                    print(f"Detected embedding dimension from test generation: {dimension}")
+                    return dimension
+            except Exception as e:
+                print(f"Could not generate test embedding: {e}")
+
+            # Default fallback
+            print("Using default embedding dimension: 4096")
+            return 4096
+
+        except Exception as e:
+            print(f"Error detecting embedding dimension: {e}")
+            return 4096
+
     def _init_tables(self) -> None:
         """Initialize vector storage tables"""
         try:
@@ -42,7 +80,7 @@ class VectorService:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-                
+
                 # Create files table for storing uploaded files
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS uploaded_files (
@@ -56,20 +94,23 @@ class VectorService:
                         upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
-                
+
                 conn.commit()
-                
+
                 # Initialize vector support for documents table if vector extension is available
                 if self.vector_enabled:
                     try:
-                        # Initialize the vector column (4096 dimensions based on embedding size)
-                        # 16384 bytes / 4 bytes per float32 = 4096 dimensions
-                        conn.execute("""
-                            SELECT vector_init('documents', 'embedding', 'type=FLOAT32,dimension=4096,distance=COSINE')
+                        # Detect the appropriate embedding dimension
+                        embedding_dim = self._get_embedding_dimension()
+
+                        # Initialize the vector column with detected dimension
+                        conn.execute(f"""
+                            SELECT vector_init('documents', 'embedding', 'type=FLOAT32,dimension={embedding_dim},distance=COSINE')
                         """)
                         conn.commit()
-                        print("Vector support initialized for documents table")
+                        print(f"Vector support initialized for documents table with {embedding_dim} dimensions")
                         self.vector_initialized = True
+                        self.embedding_dimension = embedding_dim
                     except Exception as e:
                         print(f"Vector init failed (may already be initialized): {e}")
                         # Try to check if vector extension works anyway
@@ -77,31 +118,58 @@ class VectorService:
                             conn.execute("SELECT vector_version()")
                             print("Vector extension available, assuming table already initialized")
                             self.vector_initialized = True
+                            self.embedding_dimension = self._get_embedding_dimension()
                         except:
                             print("Vector extension not working properly")
                             self.vector_initialized = False
+                            self.embedding_dimension = None
                 else:
                     self.vector_initialized = False
-                
+                    self.embedding_dimension = None
+
                 print("Vector tables initialized successfully")
                 self.tables_initialized = True
-            
+
         except Exception as e:
             print(f"Warning: Could not initialize vector tables: {e}")
             self.tables_initialized = False
     
+    def _validate_embedding_dimension(self, embedding: bytes) -> bool:
+        """Validate that the embedding has the expected dimension"""
+        if not embedding:
+            return False
+
+        embedding_dim = len(embedding) // 4
+        expected_dim = getattr(self, 'embedding_dimension', None)
+
+        if expected_dim is None:
+            # If we don't know the expected dimension, detect it
+            expected_dim = self._get_embedding_dimension()
+            self.embedding_dimension = expected_dim
+
+        if embedding_dim != expected_dim:
+            print(f"⚠️ Embedding dimension mismatch: got {embedding_dim}, expected {expected_dim}")
+            return False
+
+        return True
+
     def add_embedding_to_document(self, document_id: int, embedding: bytes) -> bool:
         """Add an embedding to an existing document"""
         if not self.vector_enabled:
             return False
-            
+
+        # Validate embedding dimension
+        if not self._validate_embedding_dimension(embedding):
+            print(f"Skipping embedding for document {document_id} due to dimension mismatch")
+            return False
+
         try:
             # Convert embedding bytes to JSON format for sqlite-vector
             import struct
             float_count = len(embedding) // 4
             embedding_array = list(struct.unpack(f'{float_count}f', embedding))
             embedding_json = json.dumps(embedding_array)
-            
+
             with self.db_manager.get_connection() as conn:
                 cursor = conn.execute(
                     "UPDATE documents SET embedding = vector_convert_f32(?) WHERE id = ?",
@@ -305,26 +373,31 @@ class VectorService:
     def similarity_search(self, query_embedding: bytes, limit: int = 5) -> List[Dict[str, Any]]:
         """Find similar documents using vector similarity (safe implementation to avoid segfaults)"""
         print(f"      🔍 SIMILARITY SEARCH: Starting with {len(query_embedding)} byte embedding, limit={limit}")
-        
+
         if not self.vector_enabled:
             print("      ❌ Vector extension not available, falling back to recent documents")
             return []  # Fallback when search fails
-        
+
+        # Validate query embedding dimension
+        if not self._validate_embedding_dimension(query_embedding):
+            print("      ❌ Query embedding dimension mismatch, skipping similarity search")
+            return []
+
         try:
             # Check if we have documents with embeddings
             with self.db_manager.get_connection() as conn:
                 count_cursor = conn.execute("SELECT COUNT(*) FROM documents WHERE embedding IS NOT NULL")
                 embedding_count = count_cursor.fetchone()[0]
                 print(f"      📈 Found {embedding_count} documents with embeddings in database")
-                
+
                 if embedding_count == 0:
                     print("      ⚠️  No documents with embeddings found, returning empty results")
                     return []
-            
+
             # Use Python-based similarity search to avoid segfaults
             print(f"      🐍 Using Python-based similarity search (safer than sqlite-vector)")
             return self._python_similarity_search(query_embedding, limit)
-            
+
         except Exception as e:
             print(f"Similarity search completely failed: {e}")
             print(f"      🔄 Falling back to no semantic results")
@@ -743,15 +816,26 @@ class VectorService:
         """Delete an uploaded file and its associated documents"""
         try:
             with self.db_manager.get_connection() as conn:
-                # Delete associated documents
-                conn.execute("""
-                    DELETE FROM documents 
+                # Delete associated documents - handle both integer and string file_id values
+                # First try integer comparison (for newer uploads)
+                cursor_docs = conn.execute("""
+                    DELETE FROM documents
+                    WHERE json_extract(metadata, '$.file_id') = ?
+                """, (file_id,))
+                deleted_docs = cursor_docs.rowcount
+
+                # Also try string comparison (for legacy uploads or edge cases)
+                cursor_docs_str = conn.execute("""
+                    DELETE FROM documents
                     WHERE json_extract(metadata, '$.file_id') = ?
                 """, (str(file_id),))
-                
+                deleted_docs += cursor_docs_str.rowcount
+
                 # Delete the file
                 cursor = conn.execute("DELETE FROM uploaded_files WHERE id = ?", (file_id,))
                 conn.commit()
+
+                print(f"Deleted {deleted_docs} document chunks for file {file_id}")
                 return cursor.rowcount > 0
         except Exception as e:
             print(f"Failed to delete file: {e}")
@@ -852,27 +936,97 @@ class VectorService:
             print(f"Failed to fix vector embeddings: {e}")
             return False
     
+    def cleanup_orphaned_chunks(self) -> int:
+        """Remove document chunks that reference non-existent files"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                # Find orphaned chunks - documents with file_id that don't exist in uploaded_files
+                cursor = conn.execute("""
+                    DELETE FROM documents
+                    WHERE json_extract(metadata, '$.file_id') IS NOT NULL
+                    AND json_extract(metadata, '$.file_id') NOT IN (
+                        SELECT id FROM uploaded_files
+                    )
+                """)
+                deleted_count = cursor.rowcount
+                conn.commit()
+
+                print(f"🗑️ Cleaned up {deleted_count} orphaned document chunks")
+                return deleted_count
+
+        except Exception as e:
+            print(f"Failed to cleanup orphaned chunks: {e}")
+            return 0
+
+    def cleanup_mismatched_embeddings(self) -> int:
+        """Remove embeddings with incorrect dimensions"""
+        if not self.vector_enabled:
+            return 0
+
+        try:
+            expected_dim = getattr(self, 'embedding_dimension', None)
+            if expected_dim is None:
+                expected_dim = self._get_embedding_dimension()
+                self.embedding_dimension = expected_dim
+
+            print(f"🔧 Checking for embeddings with incorrect dimensions (expected: {expected_dim})")
+
+            with self.db_manager.get_connection() as conn:
+                # Find embeddings with wrong dimensions
+                cursor = conn.execute("""
+                    SELECT id, embedding FROM documents
+                    WHERE embedding IS NOT NULL
+                """)
+
+                mismatched_ids = []
+                for row in cursor.fetchall():
+                    doc_id, embedding = row
+                    if embedding:
+                        actual_dim = len(embedding) // 4
+                        if actual_dim != expected_dim:
+                            mismatched_ids.append(doc_id)
+                            print(f"   Found mismatched embedding: doc {doc_id} has {actual_dim} dims, expected {expected_dim}")
+
+                # Remove mismatched embeddings
+                if mismatched_ids:
+                    placeholders = ','.join(['?' for _ in mismatched_ids])
+                    cursor = conn.execute(f"""
+                        UPDATE documents
+                        SET embedding = NULL
+                        WHERE id IN ({placeholders})
+                    """, mismatched_ids)
+                    conn.commit()
+                    print(f"🗑️ Cleared {len(mismatched_ids)} mismatched embeddings")
+                    return len(mismatched_ids)
+                else:
+                    print("✅ All embeddings have correct dimensions")
+                    return 0
+
+        except Exception as e:
+            print(f"Failed to cleanup mismatched embeddings: {e}")
+            return 0
+
     def get_file_stats(self) -> Dict[str, Any]:
         """Get statistics about uploaded files"""
         if not getattr(self, 'tables_initialized', False):
             return {"total_files": 0, "total_size": 0, "file_types": {}}
-        
+
         try:
             # Count files by type
             type_counts = self.db_manager.execute_query("""
                 SELECT file_type, COUNT(*) as count
-                FROM uploaded_files 
+                FROM uploaded_files
                 GROUP BY file_type
                 ORDER BY count DESC
             """)
-            
+
             # Total stats
             total_stats = self.db_manager.execute_query("""
-                SELECT COUNT(*) as total_files, 
+                SELECT COUNT(*) as total_files,
                        SUM(file_size) as total_size
                 FROM uploaded_files
             """)
-            
+
             return {
                 "total_files": total_stats[0][0] if total_stats and total_stats[0][0] is not None else 0,
                 "total_size": total_stats[0][1] if total_stats and total_stats[0][1] is not None else 0,

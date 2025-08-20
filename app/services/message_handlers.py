@@ -60,12 +60,13 @@ class RAGMessageHandler(MessageHandler):
     contextually relevant responses. This is the primary message processing
     strategy for the chatbot.
     """
-    
-    def __init__(self, ai_service: AIService, vector_service: VectorService, 
+
+    def __init__(self, ai_service: AIService, vector_service: VectorService,
                  search_context: SearchContext, error_recovery: ErrorRecoveryHandler,
-                 search_limit: int = 2):
+                 search_limit: int = 2, chatbot_instance=None):
         super().__init__(ai_service, vector_service, search_context, error_recovery)
         self.search_limit = search_limit
+        self.chatbot_instance = chatbot_instance
     
     def process_message(self, message: str) -> str:
         """
@@ -165,7 +166,14 @@ class RAGMessageHandler(MessageHandler):
     def _generate_response(self, prompt: str) -> str:
         """Generate a response using the AI service."""
         from .chatbot import ModelConstants  # Import here to avoid circular imports
-        return self.ai_service.generate_text(prompt, f"n_predict={ModelConstants.DEFAULT_PREDICTION_TOKENS}")
+
+        # Get prediction tokens from chatbot instance if available, otherwise use default
+        if self.chatbot_instance and hasattr(self.chatbot_instance, 'get_output_length'):
+            prediction_tokens = self.chatbot_instance.get_output_length()
+        else:
+            prediction_tokens = ModelConstants.DEFAULT_PREDICTION_TOKENS
+
+        return self.ai_service.generate_text(prompt, f"n_predict={prediction_tokens}")
     
     def _clean_response(self, response: str) -> str:
         """Clean the response by removing unwanted parts."""
@@ -229,7 +237,8 @@ class MessageHandlerFactory:
         """
         if handler_type == "rag":
             search_limit = kwargs.get("search_limit", 2)
-            return RAGMessageHandler(ai_service, vector_service, search_context, error_recovery, search_limit)
+            chatbot_instance = kwargs.get("chatbot_instance", None)
+            return RAGMessageHandler(ai_service, vector_service, search_context, error_recovery, search_limit, chatbot_instance)
         else:
             raise ValueError(f"Unknown handler type: {handler_type}. Only 'rag' is supported.")
     
