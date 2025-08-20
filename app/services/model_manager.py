@@ -83,7 +83,9 @@ class ModelManager:
 
             self._ai_service.load_model(model_path, final_options)
 
-            # Configure sampling based on config
+            # Configure sampling strategy based on temperature setting
+            # Greedy sampling (temp ≤ 0.1) for deterministic output
+            # Temperature sampling for creative/varied responses
             if config.is_greedy_sampling():
                 print("Configuring greedy sampling...")
                 self._ai_service.configure_sampler_greedy()

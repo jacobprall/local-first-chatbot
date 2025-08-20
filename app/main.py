@@ -47,7 +47,9 @@ def get_available_models() -> List[str]:
 def get_knowledge_stats_cached(chatbot_id: str) -> Dict[str, Any]:
     """Cached version of knowledge stats to improve performance"""
     try:
-        return chatbot.get_knowledge_stats()
+        stats = chatbot.get_knowledge_stats()
+        # Convert to dictionary for backward compatibility with UI code
+        return stats.to_dict()
     except Exception as e:
         print(f"Error getting knowledge stats: {e}")
         return {"document_count": 0, "rag_enabled": False, "vector_extension": False}
@@ -102,6 +104,10 @@ if "chatbot_id" not in st.session_state:
     # Generate a unique ID for this session to use with caching
     import time
     st.session_state.chatbot_id = str(int(time.time()))
+if "is_loading_chat" not in st.session_state:
+    st.session_state.is_loading_chat = False
+if "is_generating_response" not in st.session_state:
+    st.session_state.is_generating_response = False
 
 # Initialize chatbot
 chatbot = init_chatbot()
@@ -129,7 +135,7 @@ with tab1:
             else:
                 # Fallback to getting model info from chatbot
                 try:
-                    model_info = chatbot.get_model_info()
+                    model_info = chatbot.get_model_info().to_dict()
                     model_path = model_info.get("model_path", "")
                     if model_path:
                         model_name = os.path.basename(model_path)
@@ -140,7 +146,7 @@ with tab1:
                     st.write("Current model: 🤖 Model Ready")
             
             # Knowledge base status on separate line
-            knowledge_stats = chatbot.get_knowledge_stats()
+            knowledge_stats = chatbot.get_knowledge_stats().to_dict()
             doc_count = knowledge_stats['document_count']
             if doc_count > 0:
                 st.write(f"Current knowledge base: 📚 {doc_count} documents")
@@ -220,105 +226,127 @@ with tab1:
                 st.session_state.show_settings = False
                 st.rerun()
     
-    # Chat management buttons
+    # Chat management buttons - use container to prevent layout shifts
     st.divider()
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        if st.button("🗑️ Clear Chat", help="Clear current conversation"):
-            st.session_state.chat_messages = []
-            if chatbot.is_ready():
-                chatbot.reset_conversation()
-            st.rerun()
-    
-    with col2:
-        if st.button("💾 Save Chat", help="Save current conversation"):
-            if st.session_state.chat_messages:
-                # Generate a smart title from first user message
-                first_user_msg = next((msg for msg in st.session_state.chat_messages if msg["role"] == "user"), None)
-                if first_user_msg:
-                    title = first_user_msg["content"][:50] + ("..." if len(first_user_msg["content"]) > 50 else "")
-                else:
-                    from datetime import datetime
-                    title = f"Chat {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                
-                try:
-                    chat_uuid = chatbot.save_chat(st.session_state.chat_messages, title)
-                    if chat_uuid:
-                        st.success(f"Chat saved: {chat_uuid[:8]}...")
+    with st.container():
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            if st.button("🗑️ Clear Chat", help="Clear current conversation", key="clear_chat_btn", disabled=st.session_state.is_loading_chat or st.session_state.is_generating_response):
+                st.session_state.chat_messages = []
+                if chatbot.is_ready():
+                    chatbot.reset_conversation()
+                st.rerun()
+
+        with col2:
+            if st.button("💾 Save Chat", help="Save current conversation", key="save_chat_btn", disabled=st.session_state.is_loading_chat or st.session_state.is_generating_response):
+                if st.session_state.chat_messages:
+                    # Generate a smart title from first user message
+                    first_user_msg = next((msg for msg in st.session_state.chat_messages if msg["role"] == "user"), None)
+                    if first_user_msg:
+                        title = first_user_msg["content"][:50] + ("..." if len(first_user_msg["content"]) > 50 else "")
                     else:
-                        st.error("Failed to save chat")
-                except Exception as e:
-                    st.error(f"Error saving chat: {e}")
-            else:
-                st.info("No messages to save")
-    
-    with col3:
-        if st.button("🔄 Reset State", help="Reset conversation state"):
-            if chatbot.is_ready():
-                chatbot.reset_conversation()
-                st.success("Conversation state reset!")
-    
-    with col4:
-        # Chat loading with modal dialog
-        if st.button("📋 Load Chat", help="Load previous conversation"):
-            st.session_state.show_chat_loader = True
+                        from datetime import datetime
+                        title = f"Chat {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+                    try:
+                        chat_uuid = chatbot.save_chat(st.session_state.chat_messages, title)
+                        if chat_uuid:
+                            st.success(f"Chat saved: {chat_uuid[:8]}...")
+                        else:
+                            st.error("Failed to save chat")
+                    except Exception as e:
+                        st.error(f"Error saving chat: {e}")
+                else:
+                    st.info("No messages to save")
+
+        with col3:
+            if st.button("🔄 Reset State", help="Reset conversation state", key="reset_state_btn", disabled=st.session_state.is_loading_chat or st.session_state.is_generating_response):
+                if chatbot.is_ready():
+                    chatbot.reset_conversation()
+                    st.success("Conversation state reset!")
+
+        with col4:
+            # Chat loading with modal dialog
+            if st.button("📋 Load Chat", help="Load previous conversation", key="load_chat_btn", disabled=st.session_state.is_loading_chat or st.session_state.is_generating_response):
+                st.session_state.show_chat_loader = True
     
     # Chat loader modal (shown when button is clicked)
     if st.session_state.get("show_chat_loader", False):
         with st.expander("📋 Load Previous Chat", expanded=True):
-            chat_sessions = chatbot.get_chat_sessions(20)
-            
-            if chat_sessions:
-                st.write("**Recent Conversations:**")
+            # Use a container to prevent layout shifts
+            with st.container():
+                chat_sessions = chatbot.get_chat_sessions(20)
+
+                if chat_sessions:
+                    st.write("**Recent Conversations:**")
+
+                    for session in chat_sessions:
+                        col1, col2, col3 = st.columns([3, 1, 1])
+
+                        with col1:
+                            # Show session info
+                            st.write(f"**{session['title']}**")
+                            st.caption(f"{session['message_count']} messages • {session['updated_at']}")
+
+                        with col2:
+                            if st.button("Load", key=f"load_{session['id']}", type="primary", disabled=st.session_state.is_loading_chat):
+                                # Set loading state to prevent multiple clicks
+                                st.session_state.is_loading_chat = True
+
+                                # Show loading indicator
+                                with st.spinner("Loading chat..."):
+                                    try:
+                                        loaded_messages = chatbot.load_chat(session['id'])
+                                        if loaded_messages:
+                                            # Update state atomically
+                                            st.session_state.chat_messages = loaded_messages
+                                            st.session_state.show_chat_loader = False
+                                            st.session_state.is_loading_chat = False
+                                            st.success(f"Loaded chat: {session['title'][:30]}...")
+                                            st.rerun()
+                                        else:
+                                            st.session_state.is_loading_chat = False
+                                            st.error("Failed to load chat messages")
+                                    except Exception as e:
+                                        st.session_state.is_loading_chat = False
+                                        st.error(f"Error loading chat: {e}")
+
+                        with col3:
+                            if st.button("Delete", key=f"del_{session['id']}", type="secondary", disabled=st.session_state.is_loading_chat):
+                                with st.spinner("Deleting chat..."):
+                                    if chatbot.delete_chat_session(session['id']):
+                                        st.success("Chat deleted!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to delete chat")
                 
-                for session in chat_sessions:
-                    col1, col2, col3 = st.columns([3, 1, 1])
-                    
-                    with col1:
-                        # Show session info
-                        st.write(f"**{session['title']}**")
-                        st.caption(f"{session['message_count']} messages • {session['updated_at']}")
-                    
-                    with col2:
-                        if st.button("Load", key=f"load_{session['id']}", type="primary"):
-                            try:
-                                loaded_messages = chatbot.load_chat(session['id'])
-                                if loaded_messages:
-                                    st.session_state.chat_messages = loaded_messages
-                                    st.session_state.show_chat_loader = False
-                                    st.success(f"Loaded chat: {session['title'][:30]}...")
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to load chat messages")
-                            except Exception as e:
-                                st.error(f"Error loading chat: {e}")
-                    
-                    with col3:
-                        if st.button("Delete", key=f"del_{session['id']}", type="secondary"):
-                            if chatbot.delete_chat_session(session['id']):
-                                st.success("Chat deleted!")
-                                st.rerun()
-                            else:
-                                st.error("Failed to delete chat")
-                
-                # Close button
-                if st.button("Close", type="secondary"):
-                    st.session_state.show_chat_loader = False
-                    st.rerun()
-            else:
-                st.info("No saved conversations found.")
-                if st.button("Close"):
-                    st.session_state.show_chat_loader = False
-                    st.rerun()
+                    # Close button
+                    if st.button("Close", type="secondary", disabled=st.session_state.is_loading_chat):
+                        st.session_state.show_chat_loader = False
+                        st.rerun()
+                else:
+                    st.info("No saved conversations found.")
+                    if st.button("Close", disabled=st.session_state.is_loading_chat):
+                        st.session_state.show_chat_loader = False
+                        st.rerun()
     
     # Chat interface
     st.divider()
     
     # Create a dedicated chat area that's isolated from dynamic content above
-    with st.container():
-        # Display chat history
+    # Use a fixed-height container to prevent layout shifts
+    chat_container = st.container()
+    with chat_container:
+        # Show loading indicator if chat is being loaded
+        if st.session_state.is_loading_chat:
+            st.info("🔄 Loading chat...")
+        elif st.session_state.is_generating_response:
+            st.info("🤖 Generating response...")
+
+        # Display chat history in a stable container
         if st.session_state.chat_messages:
+            # Render messages without keys to prevent duplicate components
             for message in st.session_state.chat_messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
@@ -328,14 +356,21 @@ with tab1:
     
     # Ensure chat input is always at the bottom with proper spacing
     st.markdown("---")  # Visual separator
-    if prompt := st.chat_input("What's the capital of Italy?", key="chat_input"):
+
+    # Disable input during loading or generation
+    input_disabled = st.session_state.is_loading_chat or st.session_state.is_generating_response
+
+    if prompt := st.chat_input("What's the capital of Italy?", key="chat_input", disabled=input_disabled):
         if not chatbot.is_ready():
             st.error("Please load a model first!")
         else:
+            # Set generation state to prevent multiple submissions
+            st.session_state.is_generating_response = True
+
             # Add user message to history immediately
             st.session_state.chat_messages.append({"role": "user", "content": prompt})
-            
-            # Generate assistant response
+
+            # Generate assistant response without intermediate rerun
             try:
                 # Configure sampling based on settings
                 sampling_mode = st.session_state.get("sampling_mode_settings", "Greedy")
@@ -348,22 +383,24 @@ with tab1:
                     chatbot.configure_sampling(temperature=temp, top_p=top_p)
                 else:  # Greedy
                     chatbot.configure_sampling(temperature=0.0)
-                
+
                 # Generate response using streaming
                 full_response = ""
                 for token in chatbot.send_message_stream(prompt):
                     full_response += token
-                
+
                 # Add assistant message to history
                 st.session_state.chat_messages.append({"role": "assistant", "content": full_response})
-                
-                # Rerun to display the new messages
+
+                # Clear generation state and rerun to display both messages
+                st.session_state.is_generating_response = False
                 st.rerun()
-                
+
             except Exception as e:
                 st.error(f"Error generating response: {e}")
                 fallback_response = "I'm having trouble responding right now. Please try again."
                 st.session_state.chat_messages.append({"role": "assistant", "content": fallback_response})
+                st.session_state.is_generating_response = False
                 st.rerun()
     
 
@@ -550,10 +587,10 @@ with tab3:
     if chatbot.is_ready():
         st.subheader("🤖 Model Information")
         
-        model_info = chatbot.get_model_info()
-        
+        model_info = chatbot.get_model_info().to_dict()
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
             st.json({
                 "Status": model_info.get("status", "Unknown"),
@@ -562,7 +599,7 @@ with tab3:
                 "Context Length": f"{model_info.get('n_ctx_train', 'Unknown'):,}" if isinstance(model_info.get('n_ctx_train'), (int, float)) else model_info.get('n_ctx_train', 'Unknown'),
                 "Embedding Dimension": model_info.get('n_embd', 'Unknown'),
             })
-        
+
         with col2:
             st.json({
                 "Layers": model_info.get('n_layer', 'Unknown'),
@@ -587,7 +624,7 @@ with tab3:
         
         with perf_col1:
             st.metric(
-                "Knowledge Documents", 
+                "Knowledge Documents",
                 knowledge_stats['document_count'],
                 help="Total documents in knowledge base"
             )
